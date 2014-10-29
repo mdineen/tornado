@@ -46,6 +46,8 @@ try:
 except NameError:
     xrange = range  # py3
 
+from urlparse import urlparse
+
 
 class WebSocketError(Exception):
     pass
@@ -107,6 +109,29 @@ class WebSocketHandler(tornado.web.RequestHandler):
         self.open_args = args
         self.open_kwargs = kwargs
 
+
+        # NOTE: Succeeding code is taken from Tornado 4.x branch.
+
+        # Handle WebSocket Origin naming convention differences
+        # The difference between version 8 and 13 is that in 8 the
+        # client sends a "Sec-Websocket-Origin" header and in 13 it's
+        # simply "Origin".
+        if "Origin" in self.request.headers:
+            origin = self.request.headers.get("Origin")
+        else:
+            origin = self.request.headers.get("Sec-Websocket-Origin", None)
+
+        # If there was an origin header, check to make sure it matches
+        # according to check_origin. When the origin is None, we assume it
+        # did not come from a browser and that it can be passed on.
+        if origin is not None and not self.check_origin(origin):
+            self.stream.write(tornado.escape.utf8(
+                "HTTP/1.1 403 Cross origin websockets not allowed\r\n\r\n"
+            ))
+            self.stream.close()
+            return
+
+
         # Websocket only supports GET method
         if self.request.method != 'GET':
             self.stream.write(tornado.escape.utf8(
@@ -151,6 +176,49 @@ class WebSocketHandler(tornado.web.RequestHandler):
                 "HTTP/1.1 426 Upgrade Required\r\n"
                 "Sec-WebSocket-Version: 8\r\n\r\n"))
             self.stream.close()
+
+    # Taken from Tornado 4.x branch.
+    def check_origin(self, origin):
+        """Override to enable support for allowing alternate origins.
+
+        The ``origin`` argument is the value of the ``Origin`` HTTP
+        header, the url responsible for initiating this request.  This
+        method is not called for clients that do not send this header;
+        such requests are always allowed (because all browsers that
+        implement WebSockets support this header, and non-browser
+        clients do not have the same cross-site security concerns).
+
+        Should return True to accept the request or False to reject it.
+        By default, rejects all requests with an origin on a host other
+        than this one.
+
+        This is a security protection against cross site scripting attacks on
+        browsers, since WebSockets are allowed to bypass the usual same-origin
+        policies and don't use CORS headers.
+
+        To accept all cross-origin traffic (which was the default prior to
+        Tornado 4.0), simply override this method to always return true::
+
+            def check_origin(self, origin):
+                return True
+
+        To allow connections from any subdomain of your site, you might
+        do something like::
+
+            def check_origin(self, origin):
+                parsed_origin = urllib.parse.urlparse(origin)
+                return parsed_origin.netloc.endswith(".mydomain.com")
+
+        .. versionadded:: 4.0
+        """
+        parsed_origin = urlparse(origin)
+        origin = parsed_origin.netloc
+        origin = origin.lower()
+
+        host = self.request.headers.get("Host")
+
+        # Check to see that origin matches host directly, including ports
+        return origin == host
 
     def write_message(self, message, binary=False):
         """Sends the given message to the client of this Web Socket.
