@@ -46,7 +46,7 @@ try:
 except NameError:
     xrange = range  # py3
 
-from urlparse import urlparse
+from urllib.parse import urlparse
 
 
 class WebSocketError(Exception):
